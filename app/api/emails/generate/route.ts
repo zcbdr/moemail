@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { nanoid } from "nanoid"
 import { createDb } from "@/lib/db"
 import { emails } from "@/lib/schema"
-import { eq, and, gt, sql } from "drizzle-orm"
+import { and, gt, sql } from "drizzle-orm"
 import { EXPIRY_OPTIONS } from "@/types/email"
 import { EMAIL_CONFIG } from "@/config"
 import { getRequestContext } from "@cloudflare/next-on-pages"
@@ -88,18 +88,7 @@ export async function POST(request: Request) {
     }
 
     const address = `${name || nanoid(8)}@${domain}`
-    const existingStartedAt = Date.now()
-    const existingEmail = await db.query.emails.findFirst({
-      where: eq(sql`LOWER(${emails.address})`, address.toLowerCase())
-    })
-    timings.push(`existing-email;dur=${Date.now() - existingStartedAt}`)
-
-    if (existingEmail) {
-      return json(
-        { error: "该邮箱地址已被使用" },
-        { status: 409 }
-      )
-    }
+    const emailId = crypto.randomUUID()
 
     const now = new Date()
     const expires = expiryTime === 0 
@@ -107,6 +96,7 @@ export async function POST(request: Request) {
       : new Date(now.getTime() + expiryTime)
     
     const emailData: typeof emails.$inferInsert = {
+      id: emailId,
       address,
       createdAt: now,
       expiresAt: expires,
@@ -114,17 +104,22 @@ export async function POST(request: Request) {
     }
     
     const insertStartedAt = Date.now()
-    const result = await db.insert(emails)
-      .values(emailData)
-      .returning({ id: emails.id, address: emails.address })
+    await db.insert(emails).values(emailData)
     timings.push(`insert;dur=${Date.now() - insertStartedAt}`)
     
     return json({ 
-      id: result[0].id,
-      email: result[0].address 
+      id: emailId,
+      email: address 
     })
   } catch (error) {
     console.error('Failed to generate email:', error)
+    const message = error instanceof Error ? error.message : String(error)
+    if (message.toLowerCase().includes('unique') || message.toLowerCase().includes('constraint')) {
+      return json(
+        { error: "该邮箱地址已被使用" },
+        { status: 409 }
+      )
+    }
     return json(
       { error: "创建邮箱失败" },
       { status: 500 }
