@@ -47,10 +47,30 @@ async function proxyToPages(request: Request) {
   }))
 }
 
-function getCookie(request: Request, name: string) {
+function parseCookies(request: Request) {
   const cookie = request.headers.get('Cookie') || ''
-  const part = cookie.split(';').map((v) => v.trim()).find((v) => v.startsWith(`${name}=`))
-  return part ? decodeURIComponent(part.slice(name.length + 1)) : null
+  const out = new Map<string, string>()
+  for (const part of cookie.split(';')) {
+    const trimmed = part.trim()
+    const index = trimmed.indexOf('=')
+    if (index <= 0) continue
+    out.set(trimmed.slice(0, index), decodeURIComponent(trimmed.slice(index + 1)))
+  }
+  return out
+}
+
+function getCookie(request: Request, name: string) {
+  const cookies = parseCookies(request)
+  const direct = cookies.get(name)
+  if (direct) return direct
+
+  const chunks: string[] = []
+  for (let i = 0; ; i++) {
+    const value = cookies.get(`${name}.${i}`)
+    if (!value) break
+    chunks.push(value)
+  }
+  return chunks.length ? chunks.join('') : null
 }
 
 function base64urlDecode(input: string) {
@@ -364,6 +384,10 @@ export default {
     const path = url.pathname
 
     try {
+      if (path.startsWith('/api/auth')) {
+        return proxyToPages(request)
+      }
+
       if (request.method === 'GET' && path === '/api/config') {
         const res = await handleConfig(env, timings, startedAt)
         const headers = new Headers(res.headers)
