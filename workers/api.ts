@@ -1,6 +1,7 @@
 interface Env {
   DB: D1Database
   SITE_CONFIG: KVNamespace
+  AUTH_SECRET: string
 }
 
 type Role = 'emperor' | 'duke' | 'knight' | 'civilian'
@@ -44,6 +45,101 @@ async function proxyToPages(request: Request) {
     body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
     redirect: 'manual',
   }))
+}
+
+function getCookie(request: Request, name: string) {
+  const cookie = request.headers.get('Cookie') || ''
+  const part = cookie.split(';').map((v) => v.trim()).find((v) => v.startsWith(`${name}=`))
+  return part ? decodeURIComponent(part.slice(name.length + 1)) : null
+}
+
+function base64urlDecode(input: string) {
+  const normalized = input.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4)
+  const binary = atob(padded)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
+function concatBytes(...parts: Uint8Array[]) {
+  const total = parts.reduce((sum, part) => sum + part.length, 0)
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const part of parts) {
+    out.set(part, offset)
+    offset += part.length
+  }
+  return out
+}
+
+function timingSafeEqual(a: Uint8Array, b: Uint8Array) {
+  if (a.length !== b.length) return false
+  let out = 0
+  for (let i = 0; i < a.length; i++) out |= a[i] ^ b[i]
+  return out === 0
+}
+
+async function deriveAuthJsKey(secret: string, salt: string) {
+  const encoder = new TextEncoder()
+  const baseKey = await crypto.subtle.importKey('raw', encoder.encode(secret), 'HKDF', false, ['deriveBits'])
+  const bits = await crypto.subtle.deriveBits({
+    name: 'HKDF',
+    hash: 'SHA-256',
+    salt: encoder.encode(salt),
+    info: encoder.encode(`Auth.js Generated Encryption Key (${salt})`),
+  }, baseKey, 512)
+  return new Uint8Array(bits)
+}
+
+async function decodeAuthJsSessionToken(token: string, secret: string, salt: string) {
+  const [protectedHeaderB64, encryptedKeyB64, ivB64, ciphertextB64, tagB64] = token.split('.')
+  if (!protectedHeaderB64 || encryptedKeyB64 !== '' || !ivB64 || !ciphertextB64 || !tagB64) return null
+
+  const header = JSON.parse(new TextDecoder().decode(base64urlDecode(protectedHeaderB64)))
+  if (header.alg !== 'dir' || header.enc !== 'A256CBC-HS512') return null
+
+  const key = await deriveAuthJsKey(secret, salt)
+  const macKey = key.slice(0, 32)
+  const encKey = key.slice(32)
+  const aad = new TextEncoder().encode(protectedHeaderB64)
+  const iv = base64urlDecode(ivB64)
+  const ciphertext = base64urlDecode(ciphertextB64)
+  const tag = base64urlDecode(tagB64)
+  const al = new Uint8Array(8)
+  new DataView(al.buffer).setUint32(4, aad.length * 8)
+
+  const hmacKey = await crypto.subtle.importKey('raw', macKey, { name: 'HMAC', hash: 'SHA-512' }, false, ['sign'])
+  const digest = new Uint8Array(await crypto.subtle.sign('HMAC', hmacKey, concatBytes(aad, iv, ciphertext, al)))
+  if (!timingSafeEqual(digest.slice(0, 32), tag)) return null
+
+  const aesKey = await crypto.subtle.importKey('raw', encKey, 'AES-CBC', false, ['decrypt'])
+  const plaintext = await crypto.subtle.decrypt({ name: 'AES-CBC', iv }, aesKey, ciphertext)
+  return JSON.parse(new TextDecoder().decode(plaintext))
+}
+
+async function getUserIdByCookie(env: Env, request: Request, timings: string[]) {
+  const candidates = [
+    '__Secure-authjs.session-token',
+    'authjs.session-token',
+    '__Secure-next-auth.session-token',
+    'next-auth.session-token',
+  ]
+
+  const startedAt = Date.now()
+  for (const name of candidates) {
+    const token = getCookie(request, name)
+    if (!token) continue
+    try {
+      const decoded = await decodeAuthJsSessionToken(token, env.AUTH_SECRET, name)
+      if (decoded?.id && typeof decoded.id === 'string') {
+        timings.push(`cookie;dur=${Date.now() - startedAt}`)
+        return decoded.id
+      }
+    } catch {}
+  }
+  timings.push(`cookie;dur=${Date.now() - startedAt}`)
+  return null
 }
 
 async function getUserIdByApiKey(env: Env, request: Request, timings: string[]) {
@@ -275,12 +371,10 @@ export default {
         return new Response(res.body, { status: res.status, headers })
       }
 
-      if (!request.headers.get('X-API-Key')) {
-        return proxyToPages(request)
-      }
-
-      const userId = await getUserIdByApiKey(env, request, timings)
-      if (!userId) return json({ error: '无效的 API Key' }, { status: 401 }, timings, startedAt)
+      const userId = request.headers.get('X-API-Key')
+        ? await getUserIdByApiKey(env, request, timings)
+        : await getUserIdByCookie(env, request, timings)
+      if (!userId) return json({ error: request.headers.get('X-API-Key') ? '无效的 API Key' : '未授权' }, { status: 401 }, timings, startedAt)
 
       let response: Response | null = null
       if (request.method === 'GET' && path === '/api/emails') response = await handleEmails(env, request, userId, timings, startedAt)
