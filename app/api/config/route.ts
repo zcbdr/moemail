@@ -18,9 +18,9 @@ export async function GET(request: Request) {
     return Response.json(body, { ...init, headers })
   }
 
-  let tick = Date.now()
+  const envStartedAt = Date.now()
   const env = getRequestContext().env
-  tick = mark('env', tick)
+  mark('env', envStartedAt)
 
   const hasCredentials = Boolean(
     request.headers.get('X-API-Key') ||

@@ -25,16 +25,19 @@ export async function POST(request: Request) {
     return NextResponse.json(body, { ...init, headers })
   }
 
-  let tick = Date.now()
+  const dbStartedAt = Date.now()
   const db = createDb()
-  tick = mark('create-db', tick)
+  mark('create-db', dbStartedAt)
+  const envStartedAt = Date.now()
   const env = getRequestContext().env
-  tick = mark('env', tick)
+  mark('env', envStartedAt)
 
+  const userStartedAt = Date.now()
   const userId = await getUserId()
-  tick = mark('user', tick)
+  mark('user', userStartedAt)
+  const roleStartedAt = Date.now()
   const userRole = await getUserRole(userId!)
-  tick = mark('role', tick)
+  mark('role', roleStartedAt)
 
   try {
     if (userRole !== ROLES.EMPEROR) {
