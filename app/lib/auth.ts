@@ -98,7 +98,13 @@ export const {
   signIn,
   signOut
 } = NextAuth(() => {
-  const env = getRequestContext().env
+  const env = getRequestContext().env as CloudflareEnv & {
+    AUTH_SECRET: string
+    AUTH_GITHUB_ID: string
+    AUTH_GITHUB_SECRET: string
+    AUTH_GOOGLE_ID?: string
+    AUTH_GOOGLE_SECRET?: string
+  }
 
   return {
     secret: env.AUTH_SECRET,
