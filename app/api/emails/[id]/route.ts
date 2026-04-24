@@ -52,20 +52,39 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const startedAt = Date.now()
+  const timings: string[] = []
+  const mark = (name: string, from: number) => {
+    timings.push(`${name};dur=${Date.now() - from}`)
+    return Date.now()
+  }
+  const json = (body: unknown, init?: ResponseInit) => {
+    const headers = new Headers(init?.headers)
+    headers.set('Server-Timing', [...timings, `total;dur=${Date.now() - startedAt}`].join(', '))
+    return NextResponse.json(body, { ...init, headers })
+  }
+
   const { searchParams } = new URL(request.url)
   const cursorStr = searchParams.get('cursor')
   const messageType = searchParams.get('type')
   const includeTotal = searchParams.get('includeTotal') === '1'
 
   try {
+    let tick = Date.now()
     const db = createDb()
+    tick = mark('create-db', tick)
+
     const { id } = await params
+    tick = mark('params', tick)
 
     const userId = await getUserId()
+    tick = mark('user', tick)
     if (messageType === 'sent') {
+      const permissionStartedAt = Date.now()
       const permissionResult = await checkBasicSendPermission(userId!)
+      timings.push(`send-permission;dur=${Date.now() - permissionStartedAt}`)
       if (!permissionResult.canSend) {
-        return NextResponse.json(
+        return json(
           { error: permissionResult.error || "您没有查看发送邮件的权限" },
           { status: 403 }
         )
@@ -122,14 +141,16 @@ export async function GET(
       limit: PAGE_SIZE + 1
     })
 
+    const queriesStartedAt = Date.now()
     const [email, totalResult, results] = await Promise.all([
       emailPromise,
       totalPromise,
       resultsPromise,
     ])
+    timings.push(`d1-queries;dur=${Date.now() - queriesStartedAt}`)
 
     if (!email) {
-      return NextResponse.json(
+      return json(
         { error: "无权限查看" },
         { status: 403 }
       )
@@ -139,6 +160,7 @@ export async function GET(
       ? Number(totalResult[0].count)
       : undefined
     
+    tick = Date.now()
     const hasMore = results.length > PAGE_SIZE
     const nextCursor = hasMore 
       ? encodeCursor(
@@ -150,7 +172,7 @@ export async function GET(
       : null
     const messageList = hasMore ? results.slice(0, PAGE_SIZE) : results
 
-    return NextResponse.json({ 
+    const body = { 
       messages: messageList.map(msg => ({
         id: msg.id,
         from_address: msg?.fromAddress,
@@ -163,10 +185,13 @@ export async function GET(
       })),
       nextCursor,
       ...(includeTotal ? { total: totalCount } : {})
-    })
+    }
+    timings.push(`serialize;dur=${Date.now() - tick}`)
+
+    return json(body)
   } catch (error) {
     console.error('Failed to fetch messages:', error)
-    return NextResponse.json(
+    return json(
       { error: "Failed to fetch messages" },
       { status: 500 }
     )
