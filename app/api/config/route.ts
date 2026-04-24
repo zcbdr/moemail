@@ -24,7 +24,8 @@ export async function GET(request: Request) {
 
   const hasCredentials = Boolean(
     request.headers.get('Authorization') ||
-    request.headers.get('Cookie')
+    request.headers.get('Cookie') ||
+    request.headers.get('X-API-Key')
   )
 
   const permissionStartedAt = Date.now()

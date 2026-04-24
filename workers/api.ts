@@ -418,6 +418,17 @@ export default {
       }
 
       if (request.method === 'GET' && path === '/api/config') {
+        const hasCredentials = Boolean(
+          request.headers.get('X-API-Key') ||
+          request.headers.get('Authorization') ||
+          request.headers.get('Cookie')
+        )
+
+        // Public config stays on the fast Worker path. Authenticated config requests
+        // must go to the original Pages route so admins can fetch sensitive
+        // Turnstile settings (especially TURNSTILE_SECRET_KEY) after permission checks.
+        if (hasCredentials) return proxyToPages(request)
+
         const res = await handleConfig(env, timings, startedAt)
         const headers = new Headers(res.headers)
         for (const [k, v] of corsHeaders(request)) headers.set(k, v)
