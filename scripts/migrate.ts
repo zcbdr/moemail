@@ -54,7 +54,10 @@ async function migrate() {
     
     // Applying migrations
     console.log(`Applying migrations to ${mode} database: ${dbName}`)
-    await execAsync(`wrangler d1 migrations apply ${dbName} --${mode}`)
+    const wranglerCommand = mode === 'remote'
+      ? `pnpm dlx wrangler@4 d1 migrations apply ${dbName} --remote`
+      : `wrangler d1 migrations apply ${dbName} --local`
+    await execAsync(wranglerCommand)
 
     console.log('Migration completed successfully!')
   } catch (error) {
