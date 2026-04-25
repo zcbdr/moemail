@@ -413,7 +413,7 @@ export default {
     const path = url.pathname
 
     try {
-      if (path.startsWith('/api/auth')) {
+      if (path.startsWith('/api/auth') || path.startsWith('/api/shared')) {
         return proxyToPages(request)
       }
 

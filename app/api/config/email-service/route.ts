@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { getRequestContext } from "@cloudflare/next-on-pages"
 import { EMAIL_CONFIG } from "@/config"
+import { checkPermission } from "@/lib/auth"
+import { PERMISSIONS } from "@/lib/permissions"
 
 export const runtime = "edge"
 
@@ -14,6 +16,11 @@ interface EmailServiceConfig {
 }
 
 export async function GET() {
+  const hasPermission = await checkPermission(PERMISSIONS.MANAGE_CONFIG)
+  if (!hasPermission) {
+    return NextResponse.json({ error: "权限不足" }, { status: 403 })
+  }
+
   const startedAt = Date.now()
   const timings: string[] = []
   const json = (body: unknown, init?: ResponseInit) => {
@@ -54,6 +61,11 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const hasPermission = await checkPermission(PERMISSIONS.MANAGE_CONFIG)
+  if (!hasPermission) {
+    return NextResponse.json({ error: "权限不足" }, { status: 403 })
+  }
+
   try {
     const config = await request.json() as EmailServiceConfig
 

@@ -1,6 +1,6 @@
 import { createDb } from "@/lib/db"
 import { emailShares, messages } from "@/lib/schema"
-import { eq, and } from "drizzle-orm"
+import { eq, and, or, ne, isNull } from "drizzle-orm"
 import { NextResponse } from "next/server"
 
 export const runtime = "edge"
@@ -49,7 +49,11 @@ export async function GET(
     const message = await db.query.messages.findFirst({
       where: and(
         eq(messages.id, messageId),
-        eq(messages.emailId, share.email.id)
+        eq(messages.emailId, share.email.id),
+        or(
+          ne(messages.type, "sent"),
+          isNull(messages.type)
+        )
       )
     })
 
