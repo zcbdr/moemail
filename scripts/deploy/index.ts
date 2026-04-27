@@ -19,6 +19,27 @@ const CUSTOM_DOMAIN = process.env.CUSTOM_DOMAIN;
 const KV_NAMESPACE_ID = process.env.KV_NAMESPACE_ID;
 
 /**
+ * 从域名/URL配置中提取主机名。
+ */
+function getHostname(domainOrUrl: string) {
+  try {
+    return new URL(domainOrUrl).hostname;
+  } catch {
+    return domainOrUrl.replace(/^https?:\/\//, "").split("/")[0];
+  }
+}
+
+/**
+ * 从主机名推断 Cloudflare zone name。
+ */
+function getZoneName(hostname: string) {
+  const parts = hostname.split(".").filter(Boolean);
+  return parts.length >= 2 ? parts.slice(-2).join(".") : hostname;
+}
+
+const CUSTOM_DOMAIN_HOST = CUSTOM_DOMAIN ? getHostname(CUSTOM_DOMAIN) : undefined;
+
+/**
  * 验证必要的环境变量
  */
 const validateEnvironment = () => {
@@ -65,6 +86,9 @@ const setupConfigFile = (examplePath: string, targetPath: string) => {
         case "wrangler.cleanup.json":
           json.name = `${PROJECT_NAME}-cleanup-worker`;
           break;
+        case "wrangler.api.json":
+          json.name = `${PROJECT_NAME}-api-worker`;
+          break;
         default:
           break;
       }
@@ -73,6 +97,20 @@ const setupConfigFile = (examplePath: string, targetPath: string) => {
     // 处理数据库配置
     if (json.d1_databases && json.d1_databases.length > 0) {
       json.d1_databases[0].database_name = DATABASE_NAME;
+    }
+
+    // 处理 API Worker 自定义域名路由
+    if (targetPath.endsWith("wrangler.api.json")) {
+      if (CUSTOM_DOMAIN_HOST) {
+        json.routes = [
+          {
+            pattern: `${CUSTOM_DOMAIN_HOST}/api/*`,
+            zone_name: getZoneName(CUSTOM_DOMAIN_HOST),
+          },
+        ];
+      } else {
+        delete json.routes;
+      }
     }
 
     // 写入配置文件
@@ -94,6 +132,7 @@ const setupWranglerConfigs = () => {
     { example: "wrangler.example.json", target: "wrangler.json" },
     { example: "wrangler.email.example.json", target: "wrangler.email.json" },
     { example: "wrangler.cleanup.example.json", target: "wrangler.cleanup.json" },
+    { example: "wrangler.api.example.json", target: "wrangler.api.json" },
   ];
 
   // 处理每个配置文件
@@ -116,6 +155,7 @@ const updateDatabaseConfig = (dbId: string) => {
     "wrangler.json",
     "wrangler.email.json",
     "wrangler.cleanup.json",
+    "wrangler.api.json",
   ];
 
   for (const filename of configFiles) {
@@ -141,18 +181,21 @@ const updateDatabaseConfig = (dbId: string) => {
 const updateKVConfig = (namespaceId: string) => {
   console.log(`📝 Updating KV namespace ID (${namespaceId}) in configurations...`);
 
-  // KV命名空间只在主wrangler.json中使用
-  const wranglerPath = resolve("wrangler.json");
-  if (existsSync(wranglerPath)) {
+  const configFiles = ["wrangler.json", "wrangler.api.json"];
+
+  for (const filename of configFiles) {
+    const configPath = resolve(filename);
+    if (!existsSync(configPath)) continue;
+
     try {
-      const json = JSON.parse(readFileSync(wranglerPath, "utf-8"));
+      const json = JSON.parse(readFileSync(configPath, "utf-8"));
       if (json.kv_namespaces && json.kv_namespaces.length > 0) {
         json.kv_namespaces[0].id = namespaceId;
       }
-      writeFileSync(wranglerPath, JSON.stringify(json, null, 2));
-      console.log(`✅ Updated KV namespace ID in wrangler.json`);
+      writeFileSync(configPath, JSON.stringify(json, null, 2));
+      console.log(`✅ Updated KV namespace ID in ${filename}`);
     } catch (error) {
-      console.error(`❌ Failed to update wrangler.json:`, error);
+      console.error(`❌ Failed to update ${filename}:`, error);
     }
   }
 };
@@ -407,6 +450,55 @@ const deployCleanupWorker = () => {
 };
 
 /**
+ * 推送API Worker密钥
+ */
+const pushAPIWorkerSecret = () => {
+  console.log("🔐 Pushing environment secrets to API Worker...");
+
+  if (!process.env.AUTH_SECRET) {
+    console.log("⚠️ AUTH_SECRET is empty, skipping API Worker secrets");
+    return;
+  }
+
+  const runtimeEnvFile = resolve('.env.api-worker.json');
+
+  try {
+    writeFileSync(runtimeEnvFile, JSON.stringify({ AUTH_SECRET: process.env.AUTH_SECRET }, null, 2));
+    execSync(`pnpm dlx wrangler secret bulk ${runtimeEnvFile} --config wrangler.api.json`, {
+      stdio: "inherit"
+    });
+    execSync(`rm ${runtimeEnvFile}`, { stdio: "inherit" });
+    console.log("✅ API Worker secrets pushed successfully");
+  } catch (error) {
+    console.error("❌ Failed to push API Worker secrets:", error);
+
+    if (existsSync(runtimeEnvFile)) {
+      try {
+        execSync(`rm ${runtimeEnvFile}`, { stdio: "inherit" });
+      } catch (cleanupError) {
+        console.error("⚠️ Failed to cleanup temporary file:", cleanupError);
+      }
+    }
+
+    throw error;
+  }
+};
+
+/**
+ * 部署API Worker
+ */
+const deployAPIWorker = () => {
+  console.log("🚧 Deploying API Worker...");
+  try {
+    execSync("pnpm dlx wrangler deploy --config wrangler.api.json", { stdio: "inherit" });
+    console.log("✅ API Worker deployed successfully");
+  } catch (error) {
+    console.error("❌ API Worker deployment failed:", error);
+    // 继续执行而不中断
+  }
+};
+
+/**
  * 创建或更新环境变量文件
  */
 const setupEnvFile = () => {
@@ -487,6 +579,8 @@ const main = async () => {
     deployPages();
     deployEmailWorker();
     deployCleanupWorker();
+    pushAPIWorkerSecret();
+    deployAPIWorker();
 
     console.log("🎉 Deployment completed successfully");
   } catch (error) {

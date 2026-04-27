@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "moemail-api-worker",
+  "main": "workers/api.ts",
+  "compatibility_date": "2024-03-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "example.com/api/*",
+      "zone_name": "example.com"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "migrations_dir": "drizzle",
+      "database_name": "moemail-db",
+      "database_id": "${DATABASE_ID}"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SITE_CONFIG",
+      "id": "${KV_NAMESPACE_ID}"
+    }
+  ]
+}
