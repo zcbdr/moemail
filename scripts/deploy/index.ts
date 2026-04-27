@@ -19,6 +19,7 @@ const CUSTOM_DOMAIN = process.env.CUSTOM_DOMAIN;
 const KV_NAMESPACE_ID = process.env.KV_NAMESPACE_ID;
 const API_WORKER_ROUTE_PATTERN = process.env.API_WORKER_ROUTE_PATTERN;
 const API_WORKER_ZONE_NAME = process.env.API_WORKER_ZONE_NAME;
+const PAGES_ORIGIN = process.env.PAGES_ORIGIN;
 
 /**
  * 从域名/URL配置中提取主机名。
@@ -96,6 +97,16 @@ const setupConfigFile = (examplePath: string, targetPath: string) => {
           break;
         default:
           break;
+      }
+    }
+
+    // 处理普通 Worker 变量占位符
+    if (json.vars) {
+      for (const key of Object.keys(json.vars)) {
+        const value = process.env[key];
+        if (typeof json.vars[key] === 'string' && json.vars[key].startsWith('${') && value) {
+          json.vars[key] = value;
+        }
       }
     }
 
@@ -300,12 +311,20 @@ const checkAndCreatePages = async () => {
   console.log(`🔍 Checking if project "${PROJECT_NAME}" exists...`);
 
   try {
-    await getPages();
+    const pages = await getPages();
     console.log("✅ Project already exists, proceeding with update...");
+
+    if (!PAGES_ORIGIN && pages.subdomain) {
+      updateEnvVar("PAGES_ORIGIN", `https://${pages.subdomain}`);
+    }
   } catch (error) {
     if (error instanceof NotFoundError) {
       console.log("⚠️ Project not found, creating new project...");
       const pages = await createPages();
+
+      if (!PAGES_ORIGIN && pages.subdomain) {
+        updateEnvVar("PAGES_ORIGIN", `https://${pages.subdomain}`);
+      }
 
       if (!CUSTOM_DOMAIN && pages.subdomain) {
         console.log("⚠️ CUSTOM_DOMAIN is empty, using pages default domain...");
@@ -320,6 +339,26 @@ const checkAndCreatePages = async () => {
       throw error;
     }
   }
+};
+
+
+/**
+ * 更新 API Worker 的 Pages 源站配置。
+ */
+const updateAPIWorkerPagesOriginConfig = () => {
+  const configPath = resolve("wrangler.api.json");
+  if (!existsSync(configPath)) return;
+
+  const pagesOrigin = process.env.PAGES_ORIGIN;
+  if (!pagesOrigin) {
+    console.log("⚠️ PAGES_ORIGIN is empty, API Worker auth proxy may not work");
+    return;
+  }
+
+  const json = JSON.parse(readFileSync(configPath, "utf-8"));
+  json.vars = { ...(json.vars || {}), PAGES_ORIGIN: pagesOrigin };
+  writeFileSync(configPath, JSON.stringify(json, null, 2));
+  console.log(`✅ Updated PAGES_ORIGIN in wrangler.api.json (${pagesOrigin})`);
 };
 
 /**
@@ -583,6 +622,7 @@ const main = async () => {
     migrateDatabase();
     await checkAndCreateKVNamespace();
     await checkAndCreatePages();
+    updateAPIWorkerPagesOriginConfig();
     pushPagesSecret();
     deployPages();
     deployEmailWorker();

@@ -23,5 +23,8 @@
       "binding": "SITE_CONFIG",
       "id": "${KV_NAMESPACE_ID}"
     }
-  ]
+  ],
+  "vars": {
+    "PAGES_ORIGIN": "${PAGES_ORIGIN}"
+  }
 }

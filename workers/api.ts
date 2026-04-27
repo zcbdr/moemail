@@ -2,6 +2,7 @@ interface Env {
   DB: D1Database
   SITE_CONFIG: KVNamespace
   AUTH_SECRET: string
+  PAGES_ORIGIN?: string
 }
 
 type Role = 'emperor' | 'duke' | 'knight' | 'civilian'
@@ -64,11 +65,22 @@ function corsHeaders(request: Request) {
   return headers
 }
 
-const PAGES_ORIGIN = 'https://moemail-5bt.pages.dev'
+function getPagesOrigin(env: Env) {
+  const origin = env.PAGES_ORIGIN?.trim()
+  if (!origin) return null
+  try {
+    return new URL(origin).origin
+  } catch {
+    return null
+  }
+}
 
-async function proxyToPages(request: Request) {
+async function proxyToPages(env: Env, request: Request) {
+  const pagesOrigin = getPagesOrigin(env)
+  if (!pagesOrigin) return json({ error: 'PAGES_ORIGIN is not configured' }, { status: 500 })
+
   const url = new URL(request.url)
-  const target = new URL(url.pathname + url.search, PAGES_ORIGIN)
+  const target = new URL(url.pathname + url.search, pagesOrigin)
   const headers = new Headers(request.headers)
 
   // Keep the public origin visible to NextAuth/Auth.js so generated signin and
@@ -86,7 +98,6 @@ async function proxyToPages(request: Request) {
   }))
 
   const publicOrigin = url.origin
-  const pagesOrigin = new URL(PAGES_ORIGIN).origin
   const responseHeaders = new Headers(response.headers)
   const location = responseHeaders.get('Location')
   if (location) {
@@ -695,7 +706,7 @@ export default {
 
     try {
       if (path.startsWith('/api/auth')) {
-        return proxyToPages(request)
+        return proxyToPages(env, request)
       }
 
       if (request.method === 'GET') {
@@ -745,7 +756,7 @@ export default {
         }
       }
 
-      if (!response) return proxyToPages(request)
+      if (!response) return proxyToPages(env, request)
       const headers = new Headers(response.headers)
       corsHeaders(request).forEach((v, k) => headers.set(k, v))
       return new Response(response.body, { status: response.status, headers })
