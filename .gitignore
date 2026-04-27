@@ -51,3 +51,4 @@ public/sw.js
 wrangler.json
 wrangler.cleanup.json
 wrangler.email.json
+wrangler.api.json
