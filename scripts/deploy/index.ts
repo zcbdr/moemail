@@ -17,6 +17,8 @@ const DATABASE_NAME = process.env.DATABASE_NAME || "moemail-db";
 const KV_NAMESPACE_NAME = process.env.KV_NAMESPACE_NAME || "moemail-kv";
 const CUSTOM_DOMAIN = process.env.CUSTOM_DOMAIN;
 const KV_NAMESPACE_ID = process.env.KV_NAMESPACE_ID;
+const API_WORKER_ROUTE_PATTERN = process.env.API_WORKER_ROUTE_PATTERN;
+const API_WORKER_ZONE_NAME = process.env.API_WORKER_ZONE_NAME;
 
 /**
  * 从域名/URL配置中提取主机名。
@@ -38,6 +40,9 @@ function getZoneName(hostname: string) {
 }
 
 const CUSTOM_DOMAIN_HOST = CUSTOM_DOMAIN ? getHostname(CUSTOM_DOMAIN) : undefined;
+const API_WORKER_ROUTE_HOST = API_WORKER_ROUTE_PATTERN
+  ? API_WORKER_ROUTE_PATTERN.split("/")[0]
+  : CUSTOM_DOMAIN_HOST;
 
 /**
  * 验证必要的环境变量
@@ -99,17 +104,20 @@ const setupConfigFile = (examplePath: string, targetPath: string) => {
       json.d1_databases[0].database_name = DATABASE_NAME;
     }
 
-    // 处理 API Worker 自定义域名路由
+    // 处理 API Worker 自定义域名路由。
+    // Fork 用户必须把 CUSTOM_DOMAIN/API_WORKER_ROUTE_PATTERN 设置成自己 Cloudflare 账号下的域名；
+    // 若未配置域名或使用 *.pages.dev，则仅创建 Worker，不绑定 route，避免拿模板域名部署时报错。
     if (targetPath.endsWith("wrangler.api.json")) {
-      if (CUSTOM_DOMAIN_HOST) {
+      if (API_WORKER_ROUTE_HOST && !API_WORKER_ROUTE_HOST.endsWith(".pages.dev")) {
         json.routes = [
           {
-            pattern: `${CUSTOM_DOMAIN_HOST}/api/*`,
-            zone_name: getZoneName(CUSTOM_DOMAIN_HOST),
+            pattern: API_WORKER_ROUTE_PATTERN || `${API_WORKER_ROUTE_HOST}/api/*`,
+            zone_name: API_WORKER_ZONE_NAME || getZoneName(API_WORKER_ROUTE_HOST),
           },
         ];
       } else {
         delete json.routes;
+        json.workers_dev = true;
       }
     }
 
@@ -494,7 +502,7 @@ const deployAPIWorker = () => {
     console.log("✅ API Worker deployed successfully");
   } catch (error) {
     console.error("❌ API Worker deployment failed:", error);
-    // 继续执行而不中断
+    throw error;
   }
 };
 
