@@ -427,7 +427,7 @@ const pushPagesSecret = () => {
     console.log(`📝 Found ${Object.keys(secrets).length} secrets to push:`, Object.keys(secrets).join(', '));
 
     // 使用临时文件推送secrets
-    execSync(`pnpm dlx wrangler pages secret bulk ${runtimeEnvFile}`, { 
+    execSync(`pnpm dlx wrangler pages secret bulk ${runtimeEnvFile} --project-name ${PROJECT_NAME}`, { 
       stdio: "inherit" 
     });
 
@@ -460,7 +460,8 @@ const pushPagesSecret = () => {
 const deployPages = () => {
   console.log("🚧 Deploying to Cloudflare Pages...");
   try {
-    execSync("pnpm run deploy:pages", { stdio: "inherit" });
+    execSync("pnpm run build:pages", { stdio: "inherit" });
+    execSync(`pnpm dlx wrangler pages deploy .vercel/output/static --project-name ${PROJECT_NAME} --branch main`, { stdio: "inherit" });
     console.log("✅ Pages deployment completed successfully");
   } catch (error) {
     console.error("❌ Pages deployment failed:", error);
