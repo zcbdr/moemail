@@ -21,6 +21,10 @@ const API_WORKER_ROUTE_PATTERN = process.env.API_WORKER_ROUTE_PATTERN;
 const API_WORKER_ZONE_NAME = process.env.API_WORKER_ZONE_NAME;
 const PAGES_ORIGIN = process.env.PAGES_ORIGIN;
 
+function getPublicAppUrl() {
+  return CUSTOM_DOMAIN ? `https://${getHostname(CUSTOM_DOMAIN)}` : undefined;
+}
+
 /**
  * 从域名/URL配置中提取主机名。
  */
@@ -373,7 +377,9 @@ const pushPagesSecret = () => {
     'AUTH_GITHUB_SECRET', 
     'AUTH_GOOGLE_ID', 
     'AUTH_GOOGLE_SECRET', 
-    'AUTH_SECRET'
+    'AUTH_SECRET',
+    'AUTH_URL',
+    'NEXTAUTH_URL'
   ];
 
   try {
@@ -623,6 +629,11 @@ const main = async () => {
     migrateDatabase();
     await checkAndCreateKVNamespace();
     await checkAndCreatePages();
+    const publicAppUrl = getPublicAppUrl();
+    if (publicAppUrl) {
+      if (!process.env.AUTH_URL) updateEnvVar("AUTH_URL", publicAppUrl);
+      if (!process.env.NEXTAUTH_URL) updateEnvVar("NEXTAUTH_URL", publicAppUrl);
+    }
     updateAPIWorkerPagesOriginConfig();
     pushPagesSecret();
     deployPages();
