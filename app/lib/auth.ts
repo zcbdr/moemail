@@ -118,6 +118,7 @@ export const {
         clientId: env.AUTH_GITHUB_ID,
         clientSecret: env.AUTH_GITHUB_SECRET,
         allowDangerousEmailAccountLinking: true,
+        issuer: "https://github.com/login/oauth",
       }),
       ...(env.AUTH_GOOGLE_ID && env.AUTH_GOOGLE_SECRET ? [Google({
         clientId: env.AUTH_GOOGLE_ID,
